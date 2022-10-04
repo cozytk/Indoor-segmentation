@@ -9,8 +9,10 @@ from PIL import Image
 
 import tensorflow as tf
 import numpy as np
+import tempfile
 
 from model import DeepLabResNetModel
+import coremltools as ct
 
 IMG_MEAN = np.array((104.00698793,116.66876762,122.67891434), dtype=np.float32)
 
@@ -115,6 +117,31 @@ def main():
     # Perform inference.
     preds = sess.run(pred)
 
+    model_dir = tempfile.mkdtemp()
+    graph_def_file = os.path.join(model_dir, 'tf_graph.pb')
+    checkpoint_file = os.path.join(model_dir, 'tf_model.ckpt')
+    frozen_graph_file = os.path.join(model_dir, 'tf_frozen.pb')
+
+    tf.train.write_graph(sess.graph, model_dir, graph_def_file, as_text=False)
+    saver = tf.train.Saver()
+    saver.save(sess, checkpoint_file)
+
+    freeze_graph(input_graph=graph_def_file,
+               input_saver="",
+               input_binary=True,
+               input_checkpoint=checkpoint_file,
+               output_node_names=[node.name for node in tf.get_default_graph().as_graph_def().node],
+               restore_op_name="save/restore_all",
+               filename_tensor_name="save/Const:0",
+               output_graph=frozen_graph_file,
+               clear_devices=True,
+               initializer_nodes="")
+
+    print("TensorFlow frozen graph saved at {}".format(frozen_graph_file))
+
+    mlmodel = ct.convert(frozen_graph_file, convert_to="mlprogram")
+    mlmodel.save(frozen_graph_file.replace("pb","mlpackage")))
+  
     msk = decode_labels(preds, num_classes=NUM_CLASSES)
     im = Image.fromarray(msk[0])
     if not os.path.exists(SAVE_DIR):
